@@ -1,0 +1,26 @@
+%
+% Script to set land data points to undefined values
+%
+disp('  - Applying land mask.')
+%
+good_lons = lonArrayLM >= min(sat_sub.lon(:)) & ...
+    lonArrayLM <= max(sat_sub.lon(:));
+good_lats = latArrayLM >= min(sat_sub.lat(:)) & ...
+    latArrayLM <= max(sat_sub.lat(:));
+land_in_image_domain = griddata(lonArrayLM(good_lons), ...
+    latArrayLM(good_lats), landMask2(good_lats, good_lons), ...
+    sat_sub.lon, sat_sub.lat, 'nearest');
+sat_sub.bt19h(logical(land_in_image_domain(:))) = NaN;
+sat_sub.bt19v(logical(land_in_image_domain(:))) = NaN;
+sat_sub.bt37h(logical(land_in_image_domain(:))) = NaN;
+sat_sub.bt37v(logical(land_in_image_domain(:))) = NaN;
+%
+good_lons = lonArrayLM >= min(sat_sub.lon85(:)) & ...
+    lonArrayLM <= max(sat_sub.lon85(:));
+good_lats = latArrayLM >= min(sat_sub.lat85(:)) & ...
+    latArrayLM <= max(sat_sub.lat85(:));
+land_in_image_domain = griddata(lonArrayLM(good_lons), ...
+    latArrayLM(good_lats), landMask2(good_lats, good_lons), ...
+    sat_sub.lon85, sat_sub.lat85, 'nearest');
+sat_sub.bt85h(logical(land_in_image_domain(:))) = NaN;
+sat_sub.bt85v(logical(land_in_image_domain(:))) = NaN;

@@ -1,0 +1,197 @@
+function amsreData = amsreReader(fileName)
+%
+% Read in AMSRE data from HDF files
+%
+file_id = hdfh('open',fileName,'read',0);
+
+% Open HDF SDS and VDATA Interfaces
+sd_id = hdfsd('start',fileName,'read');
+
+status = hdfv('start',file_id);
+
+[n_datasets,n_file_attrs, status] = hdfsd('fileinfo',sd_id);
+
+%disp(['Number of SDS arrays in file ' num2str(n_datasets) '.']);
+
+for index = 0:(n_datasets-1)
+    sds_id = hdfsd('select',sd_id, index);
+    [sds_name, rank, dim_sizes, num_type, attributes, status] = hdfsd('getinfo', ...
+        sds_id);
+    str = [' %2d) %-15s dimensions = ' repmat('%7d ',1,rank) ' '];
+   % disp(sprintf(str, index+1, sds_name,dim_sizes))
+    status = hdfsd('endaccess',sds_id);
+end
+%
+nparam = 4; %input('Number of parameters to write out or 0 to exit program. ');
+
+if nparam == 0
+    hdfml('closeall');
+    return;
+elseif nparam == n_datasets
+    nindex = 0;
+    for index = 1:n_datasets
+        sds_index(index) = index;
+    end
+else
+    temparm = [1 2 23 24 27 28 81 82 87 88]; % 92 variables are available
+    sds_index = temparm;
+    nindex = length(temparm);
+end
+
+if nparam > 0
+    for index = 1:nindex
+        num_element = 1;
+        sds_idx = sds_index(index)-1;
+        sds_id = hdfsd('select',sd_id,sds_idx);
+        [sds_name, rank, dim_sizes, num_type, attributes, status] = hdfsd('getinfo', sds_id);
+        [gain,gain_err,offset,offset_err,cal_data_type,status] = ...
+            hdfsd('getcal',sds_id);
+        
+        for j=1:rank
+            %fprintf('%6d',dim_sizes(j));
+            num_element = num_element*dim_sizes(j);
+        end
+        %fprintf(' \n'); 
+        
+        stride = [];
+        edges = [];
+        start = [];
+        for j = 1:rank
+            edges(j) = dim_sizes(j);
+            stride(j) = 1;
+            start(j) = 0;
+        end
+        
+        % Read TRMM sds arrays
+        [data{index}, status] = hdfsd('readdata',sds_id,start,[],edges);
+        status = hdfsd('endaccess',sds_id);
+    end
+end
+%
+status = hdfsd('end',sd_id);
+%
+amsreData.lat = double(data{1});
+amsreData.lon = double(data{2});
+amsreData.bt19V = double(data{3}) /100 + 327.68;
+amsreData.bt19H = double(data{4}) /100 + 327.68;
+amsreData.bt37V = double(data{5}) /100 + 327.68;
+amsreData.bt37H = double(data{6}) /100 + 327.68;
+amsreData.lat85 = double(data{7});
+amsreData.lon85 = double(data{8});
+amsreData.bt85V = double(data{9}) / 100 + 327.68;
+amsreData.bt85H = double(data{10}) / 100 + 327.68;
+%
+% Now read in the Vdata tables and write to seperate output files.
+
+vdata_ref = - 1;
+vdata_ref = hdfvs('getid',file_id, vdata_ref);
+if ( vdata_ref == -1 )
+    error(' No Vdatas found in data set ');
+end
+
+%fprintf('\n List of Vdata name: (rec_num rec_size) \n');
+
+total_vidx = 0;
+while(vdata_ref ~= -1)
+    vdata_id = hdfvs('attach',file_id, vdata_ref, 'r');
+    
+    [n_records, interlace, fields, vdata_size, vdata_name, status] = ...
+        hdfvs('inquire', vdata_id);
+    
+    total_vref(total_vidx+1) = vdata_ref;
+    total_vidx = total_vidx + 1;
+    %fprintf(' %2d) %-30s %5d %5d \n', total_vidx, vdata_name, n_records, vdata_size);
+    status = hdfvs('detach',vdata_id);
+    vdata_ref = hdfvs('getid',file_id,vdata_ref);
+end
+
+% line 436 of read_trmm.c
+nparm = 0;
+nparm = 1; % input('Enter total number of vdata to write out or 0 to exit program ');
+if nparm == 0
+    hdfml('closeall');
+    return;
+elseif (nparm == total_vidx)
+    nindex = 1;
+    vdata_index(nindex) = index+1;
+    nindex = ndindex +1;
+else
+    temparm = 0;
+    temparm = [1]; %input('Enter parameter numbers from above list as a matlab array ');
+    nindex = 0;
+    for index = 0:(nparm-1)
+        if temparm <=total_vidx
+            vdata_index = temparm;
+            nindex = length(temparm);
+        end
+    end
+end
+
+if nparm > 0
+    %disp('The valid vdata numbers you Enter are: ');
+    %disp(vdata_index);
+else
+    %disp('No vdata selected -- # of vdata = 0');
+end
+
+% Now loop through vdatas and write selected data(s) to binary files
+if nindex > 0
+    for index = 1:nindex
+        vdata_idx = vdata_index(index)-1;
+        vdata_id = hdfvs('attach',file_id,total_vref(vdata_idx+1),'r');
+        
+        [n_records,interlace,fields, vdata_size, vdata_name, status] = hdfvs('inquire',vdata_id);
+        
+        if status ~= 0
+            error(sprintf('VSinquire failed on vdata %s ', vdata_name));
+        end
+        
+        %fprintf(' ************************************************* \n');%
+        %fprintf(' Vdata name : %s \n', vdata_name);%
+        %fprintf(' Vdata recs : %d \n', n_records);%
+        %fprintf(' Vdata recsize : %d \n', vdata_size);%
+        
+        status = hdfvs('setfields',vdata_id,fields);
+        [vdatabuf, status] = hdfvs('read',vdata_id,n_records);
+        
+        if status ~= n_records
+            error('Vdata recs read and num_rec do not match');
+        end
+        
+        ifield = hdfvf('nfields',vdata_id);
+        
+        %disp('Field Name list: ')
+        for field_index = 0:(ifield-1)
+            fieldname = hdfvf('fieldname',vdata_id,field_index);
+            field_size = hdfvf('fieldisize',vdata_id,field_index);
+            field_order = hdfvf('fieldorder',vdata_id,field_index);
+            field_type = hdfvf('fieldtype',vdata_id,field_index);
+            %fprintf(' %-20s (size: %5d, type: %3s ) \n', fieldname,field_size, field_type);%
+        end
+        
+%         % Now write out the Vdata information to a binary file
+%         outfile = [fileName '.' vdata_name];
+%         vd_fp = fopen(outfile,'wb','b');
+%         if vd_fp == -1
+%             error(sprintf('Open vdata file failed %s ', vdata_name));
+%         end
+%         
+%         count = fwrite(vd_fp,double(vdatabuf{1}),'uint8');
+%         fclose(vd_fp);
+        status = hdfvs('detach',vdata_id);
+        
+    end % end of for statement for index of total selected vdata
+end % end of if statement for nindex
+
+status = hdfv('end',file_id);
+status = hdfh('close',file_id);
+
+%vdatabuf{1}
+% Tony's contribution (2 of 2)
+%amsreData.scanTime=datenum(double(vdatabuf{1}'),double(vdatabuf{2}'),double(vdatabuf{3}'),...
+%    double(vdatabuf{4}'),double(vdatabuf{5}'),double(vdatabuf{6}'));
+amsreData.scanTime=datenum(1993,1,1,0,0,vdatabuf{1}');
+amsreData.scanTime85 = amsreData.scanTime;
+% 
+return
+end
